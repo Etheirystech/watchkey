@@ -28,6 +28,9 @@ watchkey get DOPPLER_TOKEN_DEV
 # Store a new secret (reads from stdin)
 watchkey set MY_SECRET
 
+# Store via native macOS secure dialog (never touches terminal)
+watchkey set MY_SECRET --gui
+
 # Pipe a value in
 echo "s3cret" | watchkey set MY_SECRET
 

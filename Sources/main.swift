@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LocalAuthentication
 import Security
@@ -203,6 +204,47 @@ func readValue() -> String {
     }
 }
 
+/// Read a value via a native macOS secure input dialog.
+func readValueGUI(service: String) -> String {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    if #available(macOS 14, *) {
+        app.activate()
+    } else {
+        app.activate(ignoringOtherApps: true)
+    }
+
+    let alert = NSAlert()
+    alert.messageText = "Store secret"
+    alert.informativeText = "Enter value for \"\(service)\":"
+    alert.alertStyle = .informational
+    alert.addButton(withTitle: "Store")
+    alert.addButton(withTitle: "Cancel")
+    if let keychainIcon = NSImage(contentsOfFile: "/System/Library/CoreServices/Applications/Keychain Access.app/Contents/Resources/AppIcon.icns") {
+        keychainIcon.size = NSSize(width: 48, height: 48)
+        alert.icon = keychainIcon
+    }
+
+    let input = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+    input.placeholderString = "Secret value"
+    alert.accessoryView = input
+    alert.window.initialFirstResponder = input
+
+    let response = alert.runModal()
+    guard response == .alertFirstButtonReturn else {
+        fputs("Cancelled.\n", stderr)
+        exit(1)
+    }
+
+    let value = input.stringValue
+    guard !value.isEmpty else {
+        fputs("Error: No value provided\n", stderr)
+        exit(1)
+    }
+
+    return value
+}
+
 /// Import a value from the existing macOS keychain using `security` CLI.
 func importFromKeychain(service: String) -> String {
     let proc = Process()
@@ -250,6 +292,7 @@ func printUsage() {
     Usage:
       watchkey get <service>              Retrieve a secret
       watchkey set <service>              Store a secret (reads from stdin)
+      watchkey set <service> --gui        Store a secret via secure dialog
       watchkey set <service> --import     Import from existing keychain item
       watchkey delete <service>           Delete a stored secret
 
@@ -271,37 +314,58 @@ guard let command = args.first else {
 
 switch command {
 case "get":
-    guard args.count >= 2 else {
-        fputs("Error: Missing service name\n", stderr)
-        printUsage()
-        exit(1)
+    let getService: String
+    if args.count >= 2 {
+        getService = args[1]
+    } else {
+        fputs("Key name: ", stderr)
+        guard let line = readLine(strippingNewline: true), !line.isEmpty else {
+            fputs("Error: No key name provided\n", stderr)
+            exit(1)
+        }
+        getService = line
     }
-    print(getItem(service: args[1]), terminator: "")
+    print(getItem(service: getService), terminator: "")
 
 case "set":
-    guard args.count >= 2 else {
-        fputs("Error: Missing service name\n", stderr)
-        printUsage()
-        exit(1)
+    let setFlags = args.dropFirst().filter { $0.hasPrefix("--") }
+    let setArgs = args.dropFirst().filter { !$0.hasPrefix("--") }
+    let service: String
+    if let name = setArgs.first {
+        service = name
+    } else {
+        fputs("Key name: ", stderr)
+        guard let line = readLine(strippingNewline: true), !line.isEmpty else {
+            fputs("Error: No key name provided\n", stderr)
+            exit(1)
+        }
+        service = line
     }
-    let service = args[1]
     authenticate(reason: "store \"\(service)\" in keychain")
     let value: String
-    if args.contains("--import") {
+    if setFlags.contains("--import") {
         fputs("Importing \"\(service)\" from keychain...\n", stderr)
         value = importFromKeychain(service: service)
+    } else if setFlags.contains("--gui") {
+        value = readValueGUI(service: service)
     } else {
         value = readValue()
     }
     storeItem(service: service, value: value)
 
 case "delete":
-    guard args.count >= 2 else {
-        fputs("Error: Missing service name\n", stderr)
-        printUsage()
-        exit(1)
+    let delService: String
+    if args.count >= 2 {
+        delService = args[1]
+    } else {
+        fputs("Key name: ", stderr)
+        guard let line = readLine(strippingNewline: true), !line.isEmpty else {
+            fputs("Error: No key name provided\n", stderr)
+            exit(1)
+        }
+        delService = line
     }
-    deleteItem(service: args[1])
+    deleteItem(service: delService)
 
 case "help", "--help", "-h":
     printUsage()
