@@ -33,6 +33,20 @@ func installSignalHandlers() {
 
 // MARK: - Biometric Authentication
 
+/// Evaluates a policy synchronously. Returns nil on success, or the error on failure.
+func evaluatePolicy(_ policy: LAPolicy, context: LAContext, reason: String) -> Error? {
+    let sem = DispatchSemaphore(value: 0)
+    var authError: Error?
+
+    context.evaluatePolicy(policy, localizedReason: reason) { success, error in
+        if !success { authError = error }
+        sem.signal()
+    }
+    sem.wait()
+
+    return authError
+}
+
 /// Authenticates via Touch ID, Apple Watch, or system password.
 /// Tries biometric+watch first, falls back to device owner auth (password).
 func authenticate(reason: String) {
@@ -47,33 +61,31 @@ func authenticate(reason: String) {
         bioPolicy = .deviceOwnerAuthenticationWithBiometricsOrWatch
     }
 
-    let policy: LAPolicy
     if context.canEvaluatePolicy(bioPolicy, error: &error) {
-        policy = bioPolicy
-    } else {
-        // Fall back to password-based auth
-        var passError: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &passError) else {
-            fputs("Error: No authentication method available", stderr)
-            if let passError {
-                fputs(" (\(passError.localizedDescription))", stderr)
-            }
-            fputs("\n", stderr)
+        let bioError = evaluatePolicy(bioPolicy, context: context, reason: reason)
+        if bioError == nil { return }
+
+        // User clicked "Use Password" or biometric failed — retry with password
+        let userCancelled = (bioError as? LAError)?.code == .userCancel
+        if userCancelled {
+            fputs("Authentication cancelled.\n", stderr)
             exit(1)
         }
-        policy = .deviceOwnerAuthentication
     }
 
-    let sem = DispatchSemaphore(value: 0)
-    var authError: Error?
-
-    context.evaluatePolicy(policy, localizedReason: reason) { success, error in
-        if !success { authError = error }
-        sem.signal()
+    // Fall back to password-based auth
+    let passContext = LAContext()
+    var passError: NSError?
+    guard passContext.canEvaluatePolicy(.deviceOwnerAuthentication, error: &passError) else {
+        fputs("Error: No authentication method available", stderr)
+        if let passError {
+            fputs(" (\(passError.localizedDescription))", stderr)
+        }
+        fputs("\n", stderr)
+        exit(1)
     }
-    sem.wait()
 
-    if let authError {
+    if let authError = evaluatePolicy(.deviceOwnerAuthentication, context: passContext, reason: reason) {
         fputs("Authentication failed: \(authError.localizedDescription)\n", stderr)
         exit(1)
     }
