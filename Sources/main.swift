@@ -181,6 +181,28 @@ func deleteItem(service: String) {
     }
 }
 
+func listItems() -> [String] {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrAccount as String: keychainAccount,
+        kSecReturnAttributes as String: true,
+        kSecMatchLimit as String: kSecMatchLimitAll,
+        kSecUseDataProtectionKeychain as String: false,
+    ]
+
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+    guard status == errSecSuccess, let items = result as? [[String: Any]] else {
+        if status == errSecItemNotFound { return [] }
+        let msg = SecCopyErrorMessageString(status, nil) as String? ?? "code \(status)"
+        fputs("Error: \(msg)\n", stderr)
+        exit(1)
+    }
+
+    return items.compactMap { $0[kSecAttrService as String] as? String }.sorted()
+}
+
 // MARK: - Input Helpers
 
 /// Read a value from stdin — suppresses echo in interactive mode.
@@ -307,6 +329,7 @@ func printUsage() {
       watchkey set <service> --gui        Store a secret via secure dialog
       watchkey set <service> --import     Import from existing keychain item
       watchkey delete <service>           Delete a stored secret
+      watchkey list                       List all stored keys
 
     Examples:
       watchkey set DOPPLER_TOKEN_DEV --import
@@ -364,6 +387,11 @@ case "set":
         value = readValue()
     }
     storeItem(service: service, value: value)
+
+case "list":
+    for service in listItems() {
+        print(service)
+    }
 
 case "delete":
     let delService: String
