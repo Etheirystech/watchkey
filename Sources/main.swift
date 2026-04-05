@@ -7,6 +7,7 @@ import Security
 
 /// Account name used to namespace watchkey items in the keychain
 let keychainAccount = "watchkey"
+let watchkeyVersion = "1.1.0"
 
 // MARK: - Terminal State
 
@@ -406,6 +407,9 @@ case "delete":
         delService = line
     }
     deleteItem(service: delService)
+
+case "version", "--version", "-v":
+    print(watchkeyVersion)
 
 case "help", "--help", "-h":
     printUsage()
